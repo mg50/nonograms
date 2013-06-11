@@ -2,6 +2,6 @@ module UI where
 import Core
 
 class UI a where
+  initialize :: Game -> a ()
   display :: Game -> a ()
-  getClues :: Game -> a [(Int, Square)]
-  promptMoves :: Game -> a [(Int, Clue)]
+  promptGuesses :: Game -> a [(Int, Square)]

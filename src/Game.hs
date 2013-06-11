@@ -1,46 +1,44 @@
-module Game where
+{-# LANGUAGE ScopedTypeVariables #-}
+module Main where
 import Control.Monad
 import Control.Monad.Trans.State
 import Core
 import UI
+import UI.Vty
 import Nonogram
 import Control.Monad.Trans
 
-data Env a = Env { ui :: a, game :: Game  }
-type EnvT a = StateT (Env a) IO
+type EnvT ui = StateT Game ui
 
-uiM :: EnvT a a
-uiM = liftM ui get
-
-gameM :: EnvT a Game
-gameM = liftM game get
-
-putGame newGame = modify $ \env -> env{game=newGame}
-
-setGameM :: Game -> EnvT a ()
-setGameM g = modify $ \env -> env{game = g}
-
-nonogramM :: EnvT a Nonogram
-nonogramM = liftM nonogram gameM
-
-pushHistory :: Clues -> EnvT a ()
-pushHistory clues = modify $ \env ->
-  let g = game env
-      hist = history g
-      newHist = clues:hist
-      newGame = g{history=newHist}
-  in env{game=newGame}
+-- pushHistory :: (Monad ui) => Guesses -> EnvT ui ()
+-- pushHistory guesses = modify $ \g -> let newHist = g |> history |> (guesses:)
+--                                      in g{history=newHist}
 
 
-playSingleGame :: EnvT a ()
-playSingleGame = do g <- liftM game get
-                    moves <- liftIO $ promptMoves g
-                    let hist = history g
-                    let curr = head hist
-                    let newCurr = updateClues curr
-                    pushHistory newCurr
+-- turn :: (Monad ui, UI ui) => EnvT ui Guesses
+-- turn = do g <- get
+--           lift $ display g
+--           moves <- lift $ promptGuesses g
+--           let hist = history g
+--                   |> head
+--                   |> (`updateGuesses` moves)
+--           pushHistory hist
+--           return hist
 
--- gameLoop = do nono <- randomNonogram 5 5
---               --putGame $ newGame nono
---               let turnLoop = do undefined
---               turnLoop
+-- playGame :: (MonadIO ui, Monad ui, UI ui) => EnvT ui ()
+-- playGame = do guesses <- turn
+--               game <- get
+--               let nono = nonogram game
+--               if wins nono guesses
+--                  then return ()
+--                  else playGame
+
+-- main :: IO ()
+-- main = do rand <- randomNonogram 5 5
+--           runCursorM $ runStateT (playGame :: EnvT ConsoleM ()) $ newGame rand
+--           return ()
+
+main = do game <- liftM newGame $ randomNonogram 5 5
+          let disp = display game :: CursorM ()
+          let curs = Cursor (0, 0) Nothing
+          runStateT (runCursorM disp) curs
