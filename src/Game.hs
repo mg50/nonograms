@@ -7,6 +7,7 @@ import UI
 import UI.Vty
 import Nonogram
 import Control.Monad.Trans
+import Action
 
 type EnvT ui = StateT Game ui
 
@@ -38,7 +39,21 @@ type EnvT ui = StateT Game ui
 --           runCursorM $ runStateT (playGame :: EnvT ConsoleM ()) $ newGame rand
 --           return ()
 
+turnLoop game uiData = do
+  (action, uiData') <- unVtyIO $ promptGuesses game uiData
+  case action of
+    Quit -> unVtyIO $ shutdown uiData'
+    Update sq coords -> let game' = updateGame game coords sq
+                            won = gameWon game'
+                        in if won
+                              then do unVtyIO $ shutdown uiData'
+                                      putStrLn "YOU WIN!!!!"
+                              else turnLoop game' uiData'
+    Undo -> turnLoop (undo game) uiData'
+    Redo -> turnLoop (redo game) uiData'
+
+
 main = do game <- liftM newGame $ randomNonogram 5 5
-          let disp = display game :: CursorM ()
-          let curs = Cursor (0, 0) Nothing
-          runStateT (runCursorM disp) curs
+          vtyData <- unVtyIO $ initialize game
+          unVtyIO $ display game vtyData
+          turnLoop game vtyData

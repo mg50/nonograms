@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleInstances #-}
+
 module Core where
 import qualified Data.List as L
 import qualified Debug.Trace as T
@@ -15,8 +17,27 @@ infixl 0 |>
 (|>) :: a -> (a -> b) -> b
 x |> f = f x
 
-dimensions :: Nonogram -> (Int, Int)
-dimensions (Nonogram n) = (length (head n), length n)
+class Dimensionable a where
+  dimensions :: a -> (Int, Int)
+
+instance Dimensionable [[a]] where
+  dimensions xs = (length (head xs), length xs)
+
+instance Dimensionable Nonogram where
+  dimensions (Nonogram n) = dimensions n
+
+class Transposable a where
+  transpose :: a -> a
+
+instance Transposable [[a]] where
+  transpose = L.transpose
+
+instance Transposable Nonogram where
+  transpose = Nonogram . transpose . rows
+
+instance Transposable Game where
+  transpose (Game soln curr prev next) =
+    Game (transpose soln) (transpose curr) (map transpose prev) (map transpose next)
 
 newGame :: Nonogram -> Game
 newGame nono = let (x, y) = dimensions nono
@@ -24,11 +45,11 @@ newGame nono = let (x, y) = dimensions nono
                in Game nono curr [] []
 
 squareAt :: Game -> Int -> Int -> Square
-squareAt game x y = T.trace ("show r") $ r !! y !! x
+squareAt game x y = r !! y !! x
   where r = rows $ current game
 
 columns :: Nonogram -> [[Square]]
-columns nono = L.transpose $ rows nono
+columns nono = transpose $ rows nono
 
 partitionRow :: Eq a => [a] -> [[a]]
 partitionRow [] = []
@@ -51,6 +72,9 @@ wins answer guesses = all rowsMatch $ zip (rows answer) (rows guesses)
         cellsMatch (c1, c2) = (c1 == Filled && c2 == c1) ||
                               (c1 == Empty && c2 /= Filled)
 
+gameWon :: Game -> Bool
+gameWon game = current game == solution game
+
 updateList :: [a] -> a -> Int -> [a]
 updateList [] _ _ = []
 updateList (x:xs) y idx | idx == 0  = y:xs
@@ -60,14 +84,25 @@ updateNonogram :: Nonogram -> (Int, Int) -> Square -> Nonogram
 updateNonogram (Nonogram rows) (x, y) sq = Nonogram $ updateList rows row y
   where row = updateList (rows !! y) sq x
 
-updateGame :: Game -> (Int, Int) -> Square -> Game
-updateGame game@(Game soln curr prev next) (x, y) sq
+-- updateGame :: Game -> (Int, Int) -> Square -> Game
+-- updateGame game@(Game soln curr prev next) (x, y) sq
+--   | newCurr == curr = game
+--   | (not . null) next &&
+--     newCurr == head next = Game soln newCurr (curr:prev) (tail next)
+--   | otherwise = Game soln newCurr (curr:prev) []
+
+--   where newCurr = updateNonogram curr (x, y) sq
+
+updateGame :: Game -> [(Int, Int)] -> Square -> Game
+updateGame game@(Game soln curr prev next) coords sq
   | newCurr == curr = game
-  | (not . null) next &&
-    newCurr == head next = Game soln newCurr (curr:prev) (tail next)
+  | (not . null) next && newCurr == head next =
+      Game soln newCurr (curr:prev) (tail next)
   | otherwise = Game soln newCurr (curr:prev) []
 
-  where newCurr = updateNonogram curr (x, y) sq
+  where curr = current game
+        newCurr = L.foldl' update curr coords
+        update nono (x, y) = updateNonogram nono (x, y) sq
 
 undo :: Game -> Game
 undo game@(Game _ _ [] _) = game
@@ -80,6 +115,7 @@ redo (Game soln curr prev (x:xs)) = Game soln x (curr:prev) xs
 
 type Proven = Bool
 frontProven :: [[Square]] -> [Int] -> [Proven]
+frontProven _ [] = []
 frontProven squares hints =
   case squares of
     [] -> notp
@@ -102,3 +138,10 @@ proven squares hints =
       combined = zip front $ reverse back
       chooseProven = uncurry (||)
   in map chooseProven combined
+
+
+hints :: Nonogram -> Nonogram -> [[(Int, Proven)]]
+hints soln nono = let hints = map hintsForRow (rows soln)
+                      partitionedRows = map partitionRow (rows nono)
+                      provens = map (uncurry proven) $ zip partitionedRows hints
+                  in flip map (hints `zip` provens) $ \(h, p) -> zip h p
