@@ -80,9 +80,6 @@ setPointAtMark = do mk <- gets mark
                       Nothing -> return ()
                       Just m -> modify $ \info -> info{point = m}
 
-setCells :: [[Widget FormattedText]] -> VtyM ()
-setCells cells = modify $ \vty -> vty{cells=cells}
-
 squareAtMark :: Game -> VtyM Square
 squareAtMark game = do (x, y) <- gets point
                        return $ squareAt game x y
@@ -260,35 +257,35 @@ uiLoop game = do
     keyChan <- gets keyChan
     redraw game
     (key, modifiers) <- liftIO $ atomically $ readTChan keyChan
-    case (key, modifiers) of
-      (KASCII 'q', _) -> return Quit
+    case key of
+      KASCII 'q' -> return Quit
 
-      (KASCII 'u', _) -> do clearMark
-                            redraw game
-                            return Undo
+      KASCII 'u' -> do clearMark
+                       redraw game
+                       return Undo
 
-      (KASCII 'r', _) -> do clearMark
-                            redraw game
-                            return Redo
+      KASCII 'r' -> do clearMark
+                       redraw game
+                       return Redo
 
-      (KASCII 'x', _) -> do coords <- selectedCoords
-                            clearMark
-                            redraw game
-                            sq <- squareAtMark game
-                            let sq' = if sq == Filled then Unknown else Filled
-                            return $ Update sq' coords
+      KASCII 'x' -> do coords <- selectedCoords
+                       clearMark
+                       redraw game
+                       sq <- squareAtMark game
+                       let sq' = if sq == Filled then Unknown else Filled
+                       return $ Update sq' coords
 
-      (KASCII ' ', _) -> do coords <- selectedCoords
-                            clearMark
-                            redraw game
-                            return $ Update Unknown coords
+      KASCII ' ' -> do coords <- selectedCoords
+                       clearMark
+                       redraw game
+                       return $ Update Unknown coords
 
-      (KASCII 'c', _) -> do coords <- selectedCoords
-                            clearMark
-                            redraw game
-                            sq <- squareAtMark game
-                            let sq' = if sq == Empty then Unknown else Empty
-                            return $ Update sq' coords
+      KASCII 'c' -> do coords <- selectedCoords
+                       clearMark
+                       redraw game
+                       sq <- squareAtMark game
+                       let sq' = if sq == Empty then Unknown else Empty
+                       return $ Update sq' coords
 
       _ | isDir key -> do let Just dir = dirForKey key
                           markSet <- markIsSet
