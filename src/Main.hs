@@ -14,6 +14,7 @@ data GameResult = Exited | Won deriving (Eq)
 
 turnLoop :: (UI m) => Game -> UIData m -> m GameResult
 turnLoop game uiData = do
+  display game uiData
   (action, uiData') <- promptMove game uiData
   case action of
     Quit -> shutdown uiData' >> return Exited
@@ -29,7 +30,6 @@ turnLoop game uiData = do
 playGame :: (UI m) => Nonogram -> m GameResult
 playGame nonogram = do let game = newGame nonogram
                        uiData <- initialize game
-                       display game uiData
                        turnLoop game uiData
 
 main :: IO ()
