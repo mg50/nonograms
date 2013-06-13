@@ -25,7 +25,8 @@ data VtyData = VtyData { cells :: [[Widget FormattedText]]
                        , colHints :: [[Widget FormattedText]]
                        , point :: (Int, Int)
                        , mark :: Maybe (Int, Int)
-                       , keyChan :: TChan (Key, [Modifier]) }
+                       , keyChan :: TChan (Key, [Modifier])
+                       , done :: MVar () }
 type VtyM a = StateT VtyData IO a
 
 newtype VtyIO a = VtyIO { unVtyIO :: IO a } deriving (Monad)
@@ -43,8 +44,8 @@ movePoint game dir = let (dimX, dimY) = dimensions (current game)
                          (dx, dy) = coordsForDirection dir
                      in modify $ \cursor -> do
                        let (x, y) = point cursor
-                       let x' = x + dx
-                       let y' = y + dy
+                           x' = x + dx
+                           y' = y + dy
                        if x' `elem` [0..dimX-1] && y' `elem` [0..dimY-1]
                           then cursor{point=(x', y')}
                           else cursor
@@ -65,8 +66,8 @@ setMarkAtPoint = modify $ \cursor -> let pt = (point cursor)
 pointAlignedWithMark :: Direction -> VtyM Bool
 pointAlignedWithMark dir = do (px, py) <- gets point
                               let (dx, dy) = coordsForDirection dir
-                              let px' = px + dx
-                              let py' = py + dy
+                                  px' = px + dx
+                                  py' = py + dy
                               mk <- gets mark
                               return $ case mk of
                                          Nothing -> False
@@ -138,7 +139,6 @@ scheduleM action = StateT $ \s -> do schedule $ (runStateT action s >> return ()
 formatGrid :: Game -> VtyM ()
 formatGrid game = do
   c <- gets cells
-  let nono = current game
   forM_ (c `zip` [0..]) $ \(row, rowNum) -> do
     forM_ (row `zip` [0..]) $ \(widget, colNum) -> do
       uiType <- getUIType (colNum, rowNum)
@@ -149,7 +149,8 @@ formatGrid game = do
 
 emptyVtyData :: IO VtyData
 emptyVtyData = do keyCh <- newTChanIO
-                  return $ VtyData [] [] [] (0, 0) Nothing keyCh
+                  done <- newEmptyMVar
+                  return $ VtyData [] [] [] (0, 0) Nothing keyCh done
 
 padList :: a -> [[a]] -> [[a]]
 padList _ [] = []
@@ -221,6 +222,7 @@ initializeM game = do
                          rowHints = rh,
                          colHints = ch}
     keychan <- gets keyChan
+    done <- gets done
 
     liftIO $ forkIO $ do
         c <- newCollection
@@ -248,6 +250,8 @@ initializeM game = do
           return True
 
         runUi c defaultContext
+        putMVar done ()
+
     return ()
 
 isDir key = key `elem` [KRight, KLeft, KUp, KDown]
@@ -309,9 +313,8 @@ instance UI VtyIO where
   initialize game = VtyIO $ do d <- emptyVtyData
                                execStateT (initializeM game) d
 
-  display game vtydata = VtyIO $ return ()
-  promptMove game vtydata = VtyIO $ runStateT (uiLoop game) vtydata
+  display game vtyData = VtyIO $ return ()
+  promptMove game vtyData = VtyIO $ runStateT (uiLoop game) vtyData
 
-  shutdown vtyData = VtyIO $ do done <- newEmptyMVar
-                                schedule $ shutdownUi >> putMVar done ()
-                                takeMVar done
+  shutdown vtyData = VtyIO $ do schedule shutdownUi
+                                takeMVar (done vtyData)
