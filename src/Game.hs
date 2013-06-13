@@ -8,52 +8,35 @@ import UI.Vty
 import Nonogram
 import Control.Monad.Trans
 import Action
+import System.Environment
 
-type EnvT ui = StateT Game ui
+data GameResult = Exited | Won deriving (Eq)
 
--- pushHistory :: (Monad ui) => Guesses -> EnvT ui ()
--- pushHistory guesses = modify $ \g -> let newHist = g |> history |> (guesses:)
---                                      in g{history=newHist}
-
-
--- turn :: (Monad ui, UI ui) => EnvT ui Guesses
--- turn = do g <- get
---           lift $ display g
---           moves <- lift $ promptGuesses g
---           let hist = history g
---                   |> head
---                   |> (`updateGuesses` moves)
---           pushHistory hist
---           return hist
-
--- playGame :: (MonadIO ui, Monad ui, UI ui) => EnvT ui ()
--- playGame = do guesses <- turn
---               game <- get
---               let nono = nonogram game
---               if wins nono guesses
---                  then return ()
---                  else playGame
-
--- main :: IO ()
--- main = do rand <- randomNonogram 5 5
---           runCursorM $ runStateT (playGame :: EnvT ConsoleM ()) $ newGame rand
---           return ()
-
+turnLoop :: (UI m) => Game -> UIData m -> m GameResult
 turnLoop game uiData = do
-  (action, uiData') <- unVtyIO $ promptGuesses game uiData
+  (action, uiData') <- promptMove game uiData
   case action of
-    Quit -> unVtyIO $ shutdown uiData'
+    Quit -> shutdown uiData' >> return Exited
     Update sq coords -> let game' = updateGame game coords sq
                             won = gameWon game'
                         in if won
-                              then do unVtyIO $ shutdown uiData'
-                                      putStrLn "YOU WIN!!!!"
+                              then shutdown uiData' >> return Won
                               else turnLoop game' uiData'
     Undo -> turnLoop (undo game) uiData'
     Redo -> turnLoop (redo game) uiData'
 
 
-main = do game <- liftM newGame $ randomNonogram 10 10
-          vtyData <- unVtyIO $ initialize game
-          unVtyIO $ display game vtyData
-          turnLoop game vtyData
+playGame :: (UI m) => Nonogram -> m GameResult
+playGame nonogram = do let game = newGame nonogram
+                       uiData <- initialize game
+                       display game uiData
+                       turnLoop game uiData
+
+main :: IO ()
+main = do args <- getArgs
+          let [x, y] = if length args == 2
+                          then map read args
+                          else [10, 10]
+          nono <- randomNonogram x y
+          result <- unVtyIO $ playGame nono
+          when (result == Won) $ putStrLn "YOU WON!!!"

@@ -4,11 +4,10 @@ module UI where
 import Core
 import Action
 
-class UI a where
+class (Monad a) => UI a where
   type UIData a :: *
 
   initialize :: Game -> a (UIData a)
   display :: Game -> UIData a -> a ()
-  promptGuesses :: Game -> UIData a -> a (Action, UIData a)
-  toIO :: a b -> IO b
+  promptMove :: Game -> UIData a -> a (Action, UIData a)
   shutdown :: UIData a -> a ()

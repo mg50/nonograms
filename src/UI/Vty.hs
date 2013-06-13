@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, TypeFamilies #-}
+{-# LANGUAGE OverloadedStrings, TypeFamilies, GeneralizedNewtypeDeriving #-}
 module UI.Vty where
 import Graphics.Vty.Widgets.All
 import Graphics.Vty hiding (Cursor)
@@ -25,11 +25,10 @@ data VtyData = VtyData { cells :: [[Widget FormattedText]]
                        , colHints :: [[Widget FormattedText]]
                        , point :: (Int, Int)
                        , mark :: Maybe (Int, Int)
-                       , keyChan :: TChan (Key, [Modifier])
-                       , done :: MVar ()}
+                       , keyChan :: TChan (Key, [Modifier]) }
 type VtyM a = StateT VtyData IO a
 
-newtype VtyIO a = VtyIO { unVtyIO :: IO a }
+newtype VtyIO a = VtyIO { unVtyIO :: IO a } deriving (Monad)
 
 
 data Direction = Up | Down | Lft | Rgt
@@ -153,8 +152,7 @@ formatGrid game = do
 
 emptyVtyData :: IO VtyData
 emptyVtyData = do keyCh <- newTChanIO
-                  done <- newEmptyMVar
-                  return $ VtyData [] [] [] (0, 0) Nothing keyCh done
+                  return $ VtyData [] [] [] (0, 0) Nothing keyCh
 
 padList :: a -> [[a]] -> [[a]]
 padList _ [] = []
@@ -315,8 +313,8 @@ instance UI VtyIO where
                                execStateT (initializeM game) d
 
   display game vtydata = VtyIO $ return ()
-  promptGuesses game vtydata = VtyIO $ runStateT (uiLoop game) vtydata
+  promptMove game vtydata = VtyIO $ runStateT (uiLoop game) vtydata
 
-  shutdown vtyData = VtyIO $ do let d = done vtyData
-                                schedule $ shutdownUi >> putMVar d ()
-                                takeMVar d
+  shutdown vtyData = VtyIO $ do done <- newEmptyMVar
+                                schedule $ shutdownUi >> putMVar done ()
+                                takeMVar done
