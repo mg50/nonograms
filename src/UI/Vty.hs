@@ -263,7 +263,7 @@ uiLoop game = do
     redraw game
     (key, modifiers) <- liftIO $ atomically $ readTChan keyChan
     case (key, modifiers) of
-      (KASCII 'q', _) -> do return Quit
+      (KASCII 'q', _) -> return Quit
 
       (KASCII 'u', _) -> do clearMark
                             redraw game

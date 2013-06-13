@@ -53,7 +53,7 @@ turnLoop game uiData = do
     Redo -> turnLoop (redo game) uiData'
 
 
-main = do game <- liftM newGame $ randomNonogram 5 5
+main = do game <- liftM newGame $ randomNonogram 10 10
           vtyData <- unVtyIO $ initialize game
           unVtyIO $ display game vtyData
           turnLoop game vtyData
