@@ -73,7 +73,7 @@ wins answer guesses = all rowsMatch $ zip (rows answer) (rows guesses)
                               (c1 == Empty && c2 /= Filled)
 
 gameWon :: Game -> Bool
-gameWon game = current game == solution game
+gameWon game = wins (solution game) (current game)
 
 updateList :: [a] -> a -> Int -> [a]
 updateList [] _ _ = []
