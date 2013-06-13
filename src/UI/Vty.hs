@@ -85,7 +85,7 @@ squareAtMark :: Game -> VtyM Square
 squareAtMark game = do (x, y) <- gets point
                        return $ squareAt game x y
 
-cellWidth = 4
+cellWidth = 5
 cellHeight = 2
 
 charFor Filled = '#'
@@ -166,7 +166,8 @@ paddedHints soln nono = nono |> hints soln
 createRowHints :: Nonogram -> IO [[Widget FormattedText]]
 createRowHints soln = do let h = paddedHints soln soln
                              (x, y) = (length $ head h, length h)
-                         replicateM y $ replicateM x $ plainText ""
+                             emptyContent = T.pack $ "\n " ++ replicate cellHeight '\n'
+                         replicateM y $ replicateM x $ plainText emptyContent
 
 
 createColHints :: Nonogram -> IO [[Widget FormattedText]]
