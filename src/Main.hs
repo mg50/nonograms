@@ -1,7 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Main where
 import Control.Monad
-import Control.Monad.Trans.State
 import Core
 import UI
 import UI.Vty
@@ -19,8 +18,7 @@ turnLoop game uiData = do
   case action of
     Quit -> shutdown uiData' >> return Exited
     Update sq coords -> let game' = updateGame game coords sq
-                            won = gameWon game'
-                        in if won
+                        in if gameWon game'
                               then shutdown uiData' >> return Won
                               else turnLoop game' uiData'
     Undo -> turnLoop (undo game) uiData'

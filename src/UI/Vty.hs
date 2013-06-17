@@ -1,13 +1,12 @@
 {-# LANGUAGE OverloadedStrings, TypeFamilies, GeneralizedNewtypeDeriving #-}
 module UI.Vty where
 import Graphics.Vty.Widgets.All
-import Graphics.Vty hiding (Cursor)
+import Graphics.Vty
 import Graphics.Vty.Attributes
 import Core
 import qualified Data.List as L
 import qualified Data.Text as T
 import UI
-import System.Exit
 import Action
 import Control.Concurrent
 import Control.Concurrent.STM
@@ -81,9 +80,9 @@ setPointAtMark = do mk <- gets mark
                       Nothing -> return ()
                       Just m -> modify $ \info -> info{point = m}
 
-squareAtMark :: Game -> VtyM Square
-squareAtMark game = do (x, y) <- gets point
-                       return $ squareAt game x y
+squareAtPoint :: Game -> VtyM Square
+squareAtPoint game = do (x, y) <- gets point
+                        return $ squareAt game x y
 
 cellWidth = 5
 cellHeight = 2
@@ -255,58 +254,55 @@ initializeM game = do
 
     return ()
 
-isDir key = key `elem` [KRight, KLeft, KUp, KDown]
-dirForKey key = lookup key [(KRight, Rgt), (KLeft, Lft), (KUp, Up), (KDown, Down)]
+dirKeyMap :: [(Key, Direction)]
+dirKeyMap =  [(KRight, Rgt), (KLeft, Lft), (KUp, Up), (KDown, Down)]
 
+uiLoop :: Game -> VtyM Action
 uiLoop game = do
     keyChan <- gets keyChan
-    redraw game
     (key, modifiers) <- liftIO $ atomically $ readTChan keyChan
-    case key of
-      KASCII 'q' -> return Quit
+    maybeAction <- case key of
+      KASCII 'q' -> return $ Just Quit
 
       KASCII 'u' -> do clearMark
-                       redraw game
-                       return Undo
+                       return $ Just Undo
 
       KASCII 'r' -> do clearMark
-                       redraw game
-                       return Redo
+                       return $ Just Redo
 
       KASCII 'x' -> do coords <- selectedCoords
                        clearMark
-                       redraw game
-                       sq <- squareAtMark game
+                       sq <- squareAtPoint game
                        let sq' = if sq == Filled then Unknown else Filled
-                       return $ Update sq' coords
-
-      KASCII ' ' -> do coords <- selectedCoords
-                       clearMark
-                       redraw game
-                       return $ Update Unknown coords
+                       return $ Just $ Update sq' coords
 
       KASCII 'c' -> do coords <- selectedCoords
                        clearMark
-                       redraw game
-                       sq <- squareAtMark game
+                       sq <- squareAtPoint game
                        let sq' = if sq == Empty then Unknown else Empty
-                       return $ Update sq' coords
+                       return $ Just $ Update sq' coords
 
-      _ | isDir key -> do let Just dir = dirForKey key
-                          markSet <- markIsSet
-                          aligned <- pointAlignedWithMark dir
-                          let shifted = MShift `elem` modifiers
+      KASCII ' ' -> do coords <- selectedCoords
+                       clearMark
+                       return $ Just $ Update Unknown coords
 
-                          case () of
-                            _ | not markSet && shifted -> setMarkAtPoint
-                              | markSet && not shifted -> clearMark
-                              | markSet && not aligned -> setPointAtMark
-                              | otherwise              -> return ()
+      key -> case lookup key dirKeyMap of
+               Just dir -> do markSet <- markIsSet
+                              aligned <- pointAlignedWithMark dir
+                              let shifted = MShift `elem` modifiers
 
-                          movePoint game dir
-                          uiLoop game
-      _ -> uiLoop game
+                              case () of
+                                _ | not markSet && shifted -> setMarkAtPoint
+                                  | markSet && not shifted -> clearMark
+                                  | markSet && not aligned -> setPointAtMark
+                                  | otherwise              -> return ()
 
+                              movePoint game dir
+                              return Nothing
+               Nothing -> return Nothing
+
+    redraw game
+    maybe (uiLoop game) return maybeAction
 
 instance UI VtyIO where
   type UIData VtyIO = VtyData
@@ -315,7 +311,7 @@ instance UI VtyIO where
                                execStateT (initializeM game) d
 
   display game vtyData = VtyIO $ return ()
-  promptMove game vtyData = VtyIO $ runStateT (uiLoop game) vtyData
+  promptMove game vtyData = VtyIO $ runStateT (redraw game >> uiLoop game) vtyData
 
   shutdown vtyData = VtyIO $ do schedule shutdownUi
                                 takeMVar (done vtyData)

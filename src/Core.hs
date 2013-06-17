@@ -2,7 +2,6 @@
 
 module Core where
 import qualified Data.List as L
-import qualified Debug.Trace as T
 
 data Square = Empty | Filled | Unknown deriving (Show, Eq)
 newtype Nonogram = Nonogram { rows :: [[Square]] } deriving (Show, Eq)
