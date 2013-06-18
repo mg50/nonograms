@@ -298,10 +298,10 @@ uiLoop game = do
                                   | otherwise              -> return ()
 
                               movePoint game dir
+                              redraw game
                               return Nothing
                Nothing -> return Nothing
 
-    redraw game
     maybe (uiLoop game) return maybeAction
 
 instance UI VtyIO where
@@ -310,8 +310,8 @@ instance UI VtyIO where
   initialize game = VtyIO $ do d <- emptyVtyData
                                execStateT (initializeM game) d
 
-  display game vtyData = VtyIO $ return ()
-  promptMove game vtyData = VtyIO $ runStateT (redraw game >> uiLoop game) vtyData
+  display game vtyData = VtyIO $ runStateT (redraw game) vtyData >> return ()
+  promptMove game vtyData = VtyIO $ runStateT (uiLoop game) vtyData
 
   shutdown vtyData = VtyIO $ do schedule shutdownUi
                                 takeMVar (done vtyData)
