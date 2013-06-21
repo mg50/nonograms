@@ -2,6 +2,7 @@ module Nonogram where
 import Core
 import System.Random
 import Control.Monad
+import Solver (hasUniqueSolution)
 
 randomRow :: Int -> IO [Square]
 randomRow n = do gen <- newStdGen
@@ -11,4 +12,7 @@ randomRow n = do gen <- newStdGen
 
 randomNonogram :: Int -> Int -> IO Nonogram
 randomNonogram rows cols = do rs <- replicateM rows $ randomRow cols
-                              return $ Nonogram rs
+                              let nono = Nonogram rs
+                              if hasUniqueSolution nono
+                                 then return nono
+                                 else randomNonogram rows cols

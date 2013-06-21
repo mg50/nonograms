@@ -65,6 +65,11 @@ hintsForRow squares = map length $ dropEmpty (partitionRow squares)
                               then dropEmpty xs
                               else x:(dropEmpty xs)
 
+hintsForNonogram :: Nonogram -> ([[Int]], [[Int]])
+hintsForNonogram nono = (rh, ch)
+  where rh = map hintsForRow $ rows nono
+        ch = map hintsForRow $ columns nono
+
 wins :: Nonogram -> Nonogram -> Bool
 wins answer guesses = all rowsMatch $ zip (rows answer) (rows guesses)
   where rowsMatch (row1, row2) = all cellsMatch $ zip row1 row2
@@ -82,15 +87,6 @@ updateList (x:xs) y idx | idx == 0  = y:xs
 updateNonogram :: Nonogram -> (Int, Int) -> Square -> Nonogram
 updateNonogram (Nonogram rows) (x, y) sq = Nonogram $ updateList rows row y
   where row = updateList (rows !! y) sq x
-
--- updateGame :: Game -> (Int, Int) -> Square -> Game
--- updateGame game@(Game soln curr prev next) (x, y) sq
---   | newCurr == curr = game
---   | (not . null) next &&
---     newCurr == head next = Game soln newCurr (curr:prev) (tail next)
---   | otherwise = Game soln newCurr (curr:prev) []
-
---   where newCurr = updateNonogram curr (x, y) sq
 
 updateGame :: Game -> [(Int, Int)] -> Square -> Game
 updateGame game@(Game soln curr prev next) coords sq
