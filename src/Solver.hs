@@ -99,14 +99,13 @@ for = flip map
 
 zdd :: [[Int]] -> [[Int]] -> ZDD
 zdd rowHints colHints =
-  let y = length rowHints
-      x = length colHints
-      row = [0..x-1]
-      col = [0..y-1]
-      rowZdds = for (rowHints `zip` col) $ \(rowHint, rowNum) ->
-        let row' = makeRow (x*rowNum) y in rowZdd rowHint row'
-      colZdds = for (colHints `zip` row) $ \(colHint, colNum) ->
-        let col' = makeColumn colNum x y in rowZdd colHint col'
+  let numRows = length rowHints
+      numCols = length colHints
+
+      rowZdds = for (rowHints `zip` [0..numRows-1]) $ \(rowHint, rowNum) ->
+        let row = makeRow (numCols*rowNum) numCols in rowZdd rowHint row
+      colZdds = for (colHints `zip` [0..numCols-1]) $ \(colHint, colNum) ->
+        let col = makeColumn colNum numRows numCols in rowZdd colHint col
       merge = foldr1 join
   in (merge rowZdds) `intersection` (merge colZdds)
 
