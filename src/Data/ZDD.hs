@@ -40,6 +40,15 @@ join n1@(Node v1 hi1 lo1) n2@(Node v2 hi2 lo2)
   | v1 < v2 = Node v1 (join hi1 n2) (join lo1 n2)
   | otherwise = join n2 n1
 
+disjoin Bottom _ = Bottom
+disjoin _ Bottom = Bottom
+disjoin Top x = x
+disjoin x Top = x
+disjoin n1@(Node v1 hi1 lo1) n2@(Node v2 hi2 lo2)
+  | v1 == v2 = Node v1 (disjoin hi1 lo2 `union` disjoin lo1 hi2) (disjoin lo1 lo2)
+  | v1 < v2 = Node v1 (disjoin hi1 n2) (disjoin lo1 n2)
+  | otherwise = disjoin n2 n1
+
 intersection :: ZDD -> ZDD -> ZDD
 intersection z Bottom = Bottom
 intersection Bottom z = Bottom
@@ -59,4 +68,4 @@ toList :: ZDD -> [[Int]]
 toList zdd = L.nub $ go zdd
   where go Top = [[]]
         go Bottom = []
-        go (Node val hi lo) = go lo ++ map (val:) (go hi)
+        go (Node val hi lo) = map (val:) (go hi) ++ go lo

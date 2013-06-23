@@ -3,7 +3,7 @@
 module Solver where
 import qualified Data.List as L
 import Core (Nonogram, hintsForNonogram)
-import Data.ZDD (ZDD(..), union, intersection, join, toList)
+import Data.ZDD (ZDD(..), union, intersection, disjoin, toList)
 import Control.Parallel
 
 contiguous :: Int -> [Int] -> ZDD
@@ -24,7 +24,7 @@ rowZdd hints row = foldr1 union $ map (go hints) (L.tails row)
           | score hints > length row = Bottom
           | otherwise = let h:hs = hints
                             cont = contiguous h row
-                        in cont `join` rowZdd hs (drop (h + 1) row)
+                        in cont `disjoin` rowZdd hs (drop (h + 1) row)
 
         score [] = 0
         score xs = sum xs + length xs - 1
@@ -40,7 +40,7 @@ zdd rowHints colHints =
         let row = take numCols [rowNum*numCols..] in rowZdd rowHint row
       colZdds = for (colHints `zip` [0..]) $ \(colHint, colNum) ->
         let col = take numRows [colNum,colNum+numCols..] in rowZdd colHint col
-      merge = foldr1 join
+      merge = foldr1 disjoin
 
       zddForAllRows = merge rowZdds
       zddForAllCols = zddForAllRows `par` merge colZdds
