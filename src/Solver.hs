@@ -43,8 +43,8 @@ zdd rowHints colHints =
       merge = foldr1 disjoin
 
       zddForAllRows = merge rowZdds
-      zddForAllCols = zddForAllRows `par` merge colZdds
-  in zddForAllCols `intersection` zddForAllRows
+      zddForAllCols = merge colZdds
+  in zddForAllRows `par` zddForAllCols `pseq` (zddForAllCols `intersection` zddForAllRows)
 
 hasUniqueSolution :: Nonogram -> Bool
 hasUniqueSolution nono =
