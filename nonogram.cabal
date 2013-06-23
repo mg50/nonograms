@@ -18,7 +18,8 @@ executable nonogram
   hs-source-dirs:      src
   main-is:             Main.hs
   -- other-modules:
-  build-depends:       transformers, text, vty, hscurses, vty-ui, containers, random, mtl, base ==4.5.*, stm
+  build-depends:       transformers, text, vty, hscurses, vty-ui, containers, random, mtl, base ==4.5.*, stm, parallel
+  ghc-options:         -threaded
 
 
 test-suite tests
