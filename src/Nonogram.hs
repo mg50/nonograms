@@ -24,9 +24,9 @@ randomNonogram rows cols = do putStr "Generating new nonogram... "
                               start <- getCurrentTime
                               let nono = Nonogram rs
                                   unique = hasUniqueSolution nono
-                              endTime <- timeout 1000000 $ unique `seq` getCurrentTime
+                              endTime <- timeout 2000000 $ unique `seq` getCurrentTime
                               case endTime of
-                                Nothing -> do putStrLn "timed out finding multiple solutions"
+                                Nothing -> do putStrLn "timed out looking for multiple solutions"
                                               randomNonogram rows cols
                                 Just end -> do putStrLn $ uniqueMessage (diffUTCTime end start) unique
                                                if unique

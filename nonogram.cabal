@@ -19,7 +19,7 @@ executable nonogram
   main-is:             Main.hs
   -- other-modules:
   build-depends:       transformers, text, vty, hscurses, vty-ui, containers, random, mtl, base ==4.5.*, stm, parallel, time
-  ghc-options:         -threaded
+  ghc-options:         -O2 -threaded -with-rtsopts "-N"
 
 
 test-suite tests
