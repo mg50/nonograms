@@ -13,6 +13,10 @@ instance Show ZDD where
                                   go (n+2) hi ++ "\n" ++ go (n+2) lo
           indents n = replicate n ' '
 
+reduce :: ZDD -> ZDD
+reduce (Node _ Bottom lo) = lo
+reduce z = z
+
 union :: ZDD -> ZDD -> ZDD
 union Bottom z = z
 union z Bottom = z
@@ -23,23 +27,24 @@ union Top z = case z of
 union z Top = union Top z
 union z1 z2 | z1 == z2 = z1
             | value z1 == value z2 =
-                let hi' = union (hi z1) (hi z2)
-                    lo' = union (lo z1) (lo z2)
+                let hi' = reduce $ union (hi z1) (hi z2)
+                    lo' = reduce $ union (lo z1) (lo z2)
                 in Node (value z1) hi' lo'
             | value z1 < value z2 =
                 let lo' = union (lo z1) z2
                 in Node (value z1) (hi z1) lo'
             | otherwise = union z2 z1
 
-join Bottom _ = Bottom
-join _ Bottom = Bottom
-join Top x = x
-join x Top = x
-join n1@(Node v1 hi1 lo1) n2@(Node v2 hi2 lo2)
-  | v1 == v2 = Node v1 (join hi1 hi2 `union` join hi1 lo2 `union` join lo1 hi2) (join lo1 lo2)
-  | v1 < v2 = Node v1 (join hi1 n2) (join lo1 n2)
-  | otherwise = join n2 n1
+-- join Bottom _ = Bottom
+-- join _ Bottom = Bottom
+-- join Top x = x
+-- join x Top = x
+-- join n1@(Node v1 hi1 lo1) n2@(Node v2 hi2 lo2)
+--   | v1 == v2 = Node v1 (join hi1 hi2 `union` join hi1 lo2 `union` join lo1 hi2) (join lo1 lo2)
+--   | v1 < v2 = Node v1 (join hi1 n2) (join lo1 n2)
+--   | otherwise = join n2 n1
 
+-- This version is optimized for disjoining families which support no elements in common
 disjoin Bottom _ = Bottom
 disjoin _ Bottom = Bottom
 disjoin Top x = x
@@ -60,9 +65,27 @@ intersection z1 z2 | z1 == z2 = z1
                    | value z1 == value z2 =
                        let hi' = intersection (hi z1) (hi z2)
                            lo' = intersection (lo z1) (lo z2)
-                       in Node (value z1) hi' lo'
+                       in reduce $ Node (value z1) hi' lo'
                    | value z1 < value z2 = intersection (lo z1) z2
                    | value z1 > value z2 = intersection z2 z1
+
+-- meet :: ZDD -> ZDD -> ZDD
+-- meet z Bottom = Bottom
+-- meet Bottom z = Bottom
+-- meet z Top = Top
+-- meet Top z = Top
+-- meet n1@(Node v1 hi1 lo1) n2@(Node v2 hi2 lo2)
+--   | v1 == v2 = let hi' = hi1 `meet` hi2
+--                    lo' = meet hi1 lo2 `union` meet hi2 lo1 `union` meet lo1 lo2
+--                in Node v1 hi' lo'
+--   | v1 < v2 = meet hi1 n2 `union` meet lo1 n2
+--   | otherwise = meet n2 n1
+
+-- fromList :: [[Int]] -> ZDD
+-- fromList [] = Bottom
+-- fromList (xs:xss) = go (L.sort xs) `union` fromList xss
+--   where go [] = Top
+--         go (x:xs) = Node x (go xs) Bottom
 
 toList :: ZDD -> [[Int]]
 toList zdd = L.nub $ go zdd
