@@ -27,8 +27,8 @@ union Top z = case z of
 union z Top = union Top z
 union z1 z2 | z1 == z2 = z1
             | value z1 == value z2 =
-                let hi' = reduce $ union (hi z1) (hi z2)
-                    lo' = reduce $ union (lo z1) (lo z2)
+                let hi' = union (hi z1) (hi z2)
+                    lo' = union (lo z1) (lo z2)
                 in Node (value z1) hi' lo'
             | value z1 < value z2 =
                 let lo' = union (lo z1) z2
