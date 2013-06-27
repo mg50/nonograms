@@ -264,6 +264,10 @@ uiLoop game = do
     maybeAction <- case key of
       KASCII 'q' -> return $ Just Quit
 
+      KASCII 'd' -> if MCtrl `elem` modifiers
+                       then return $ Just Quit
+                       else return Nothing
+
       KASCII 'u' -> do clearMark
                        return $ Just Undo
 
@@ -276,11 +280,13 @@ uiLoop game = do
                        let sq' = if sq == Filled then Unknown else Filled
                        return $ Just $ Update sq' coords
 
-      KASCII 'c' -> do coords <- selectedCoords
-                       clearMark
-                       sq <- squareAtPoint game
-                       let sq' = if sq == Empty then Unknown else Empty
-                       return $ Just $ Update sq' coords
+      KASCII 'c' -> if MCtrl `elem` modifiers
+                       then return $ Just Quit
+                       else do coords <- selectedCoords
+                               clearMark
+                               sq <- squareAtPoint game
+                               let sq' = if sq == Empty then Unknown else Empty
+                               return $ Just $ Update sq' coords
 
       KASCII ' ' -> do coords <- selectedCoords
                        clearMark
