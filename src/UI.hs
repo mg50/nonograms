@@ -5,9 +5,9 @@ import Core
 import Action
 
 class (Monad a) => UI a where
-  type UIData a :: *
+  type UIChannel a :: *
 
-  initialize :: Game -> a (UIData a)
-  display :: Game -> UIData a -> a ()
-  promptAction :: Game -> UIData a -> a (Action, UIData a)
-  shutdown :: UIData a -> a ()
+  initialize :: Game -> a (UIChannel a)
+  display :: Game -> UIChannel a -> a ()
+  promptAction :: Game -> UIChannel a -> a Action
+  shutdown :: UIChannel a -> a ()

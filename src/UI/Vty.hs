@@ -28,8 +28,8 @@ data CursorData = CursorData { point :: (Int, Int)
                              , mark :: Maybe (Int, Int)
                              }
 
-data VtyData = VtyData { eventChan :: Chan.Chan NonoEvent
-                       , actionResult :: MVar (Action, VtyData)
+data VtyChan = VtyChan { eventChan :: Chan.Chan NonoEvent
+                       , actionResult :: MVar Action
                        , done :: MVar ()
                        }
 
@@ -123,11 +123,11 @@ squareText square = charFor square |> replicate cellWidth
                                    |> replicate cellHeight
                                    |> L.intercalate "\n"
 
-emptyVtyData :: IO VtyData
-emptyVtyData = do eventChan <- Chan.newChan
+emptyVtyChan :: IO VtyChan
+emptyVtyChan = do eventChan <- Chan.newChan
                   actionResult <- newEmptyMVar
                   done <- newEmptyMVar
-                  return $ VtyData eventChan actionResult done
+                  return $ VtyChan eventChan actionResult done
 
 emptyCursorData :: CursorData
 emptyCursorData = CursorData (0, 0) Nothing
@@ -227,8 +227,8 @@ makeCell cursorData square x y =
 
   in setBgColor $ BC.str (squareText square)
 
-drawUi :: (Game, CursorData, VtyData) -> [Widget ()]
-drawUi (game, cursorData, vtyData) =
+drawUi :: (Game, CursorData, VtyChan) -> [Widget ()]
+drawUi (game, cursorData, vtyChan) =
   let curr = current game
       (numCols, numRows) = dimensions curr
 
@@ -256,13 +256,13 @@ drawUi (game, cursorData, vtyData) =
 dirKeyMap :: [(Vty.Key, Direction)]
 dirKeyMap =  [(Vty.KRight, Rgt), (Vty.KLeft, Lft), (Vty.KUp, Up), (Vty.KDown, Down)]
 
-appEvent :: (Game, CursorData, VtyData) -> NonoEvent -> EventM () (Next (Game, CursorData, VtyData))
+appEvent :: (Game, CursorData, VtyChan) -> NonoEvent -> EventM () (Next (Game, CursorData, VtyChan))
 appEvent state Stop = BM.halt state
 
-appEvent (_, cursorData, vtyData) (MakeMove newGame) = BM.continue (newGame, cursorData, vtyData)
+appEvent (_, cursorData, vtyChan) (MakeMove newGame) = BM.continue (newGame, cursorData, vtyChan)
 
-appEvent state@(game, cursorData, vtyData) (VtyEvent (Vty.EvKey key modifiers)) = do
-  let putResult action = liftIO $ putMVar (actionResult vtyData) (action, vtyData)
+appEvent state@(game, cursorData, vtyChan) (VtyEvent (Vty.EvKey key modifiers)) = do
+  let putResult = liftIO . putMVar (actionResult vtyChan)
       continue = BM.continue state
       quit = putResult Quit >> continue
 
@@ -275,11 +275,11 @@ appEvent state@(game, cursorData, vtyData) (VtyEvent (Vty.EvKey key modifiers)) 
 
     Vty.KChar 'u' -> do let newData = execState clearMark cursorData
                         putResult Undo
-                        BM.continue (game, newData, vtyData)
+                        BM.continue (game, newData, vtyChan)
 
     Vty.KChar 'r' -> do let newData = execState clearMark cursorData
                         putResult Redo
-                        BM.continue (game, newData, vtyData)
+                        BM.continue (game, newData, vtyChan)
 
     Vty.KChar 'x' -> do let action = do coords <- selectedCoords
                                         clearMark
@@ -289,7 +289,7 @@ appEvent state@(game, cursorData, vtyData) (VtyEvent (Vty.EvKey key modifiers)) 
                             ((sq, coords), newData) = runState action cursorData
 
                         putResult (Update sq coords)
-                        BM.continue (game, newData, vtyData)
+                        BM.continue (game, newData, vtyChan)
 
     Vty.KChar 'c' -> if Vty.MCtrl `elem` modifiers
                         then quit
@@ -301,7 +301,7 @@ appEvent state@(game, cursorData, vtyData) (VtyEvent (Vty.EvKey key modifiers)) 
                                     ((sq, coords), newData) = runState action cursorData
 
                                 putResult (Update sq coords)
-                                BM.continue (game, newData, vtyData)
+                                BM.continue (game, newData, vtyChan)
 
     Vty.KChar ' ' -> do let action = do coords <- selectedCoords
                                         clearMark
@@ -309,7 +309,7 @@ appEvent state@(game, cursorData, vtyData) (VtyEvent (Vty.EvKey key modifiers)) 
                             (coords, newData) = runState action cursorData
 
                         putResult (Update Unknown coords)
-                        BM.continue (game, newData, vtyData)
+                        BM.continue (game, newData, vtyChan)
 
     key ->
       case lookup key dirKeyMap of
@@ -327,9 +327,9 @@ appEvent state@(game, cursorData, vtyData) (VtyEvent (Vty.EvKey key modifiers)) 
                                     movePoint game dir
                         newData = execState action cursorData
 
-                    in BM.continue (game, newData, vtyData)
+                    in BM.continue (game, newData, vtyChan)
 
-app :: BM.App (Game, CursorData, VtyData) NonoEvent ()
+app :: BM.App (Game, CursorData, VtyChan) NonoEvent ()
 app = BM.App { BM.appDraw = drawUi
              , BM.appAttrMap = const attrMap
              , BM.appLiftVtyEvent = VtyEvent
@@ -339,17 +339,17 @@ app = BM.App { BM.appDraw = drawUi
              }
 
 instance UI VtyIO where
-  type UIData VtyIO = VtyData
+  type UIChannel VtyIO = VtyChan
 
   initialize game = VtyIO $ do
-    vtyData <- emptyVtyData
-    forkIO $ do BM.customMain (Vty.mkVty def) (eventChan vtyData) app (game, emptyCursorData, vtyData)
-                putMVar (done vtyData) ()
-    return vtyData
+    vtyChan <- emptyVtyChan
+    forkIO $ do BM.customMain (Vty.mkVty def) (eventChan vtyChan) app (game, emptyCursorData, vtyChan)
+                putMVar (done vtyChan) ()
+    return vtyChan
 
-  display game vtyData = VtyIO $ Chan.writeChan (eventChan vtyData) (MakeMove game)
+  display game vtyChan = VtyIO $ Chan.writeChan (eventChan vtyChan) (MakeMove game)
 
-  promptAction game vtyData = VtyIO $ takeMVar (actionResult vtyData)
+  promptAction game vtyChan = VtyIO $ takeMVar (actionResult vtyChan)
 
-  shutdown vtyData = VtyIO $ do Chan.writeChan (eventChan vtyData) Stop
-                                takeMVar (done vtyData)
+  shutdown vtyChan = VtyIO $ do Chan.writeChan (eventChan vtyChan) Stop
+                                takeMVar (done vtyChan)

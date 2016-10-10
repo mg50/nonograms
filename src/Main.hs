@@ -10,23 +10,23 @@ import System.Environment
 
 data GameResult = Exited | Won deriving (Eq)
 
-turnLoop :: (UI m) => Game -> UIData m -> m GameResult
-turnLoop game uiData = do
-  display game uiData
-  (action, uiData') <- promptAction game uiData
+turnLoop :: (UI m) => Game -> UIChannel m -> m GameResult
+turnLoop game uiChannel = do
+  display game uiChannel
+  action <- promptAction game uiChannel
   case action of
-    Quit -> shutdown uiData' >> return Exited
+    Quit -> shutdown uiChannel >> return Exited
     Update sq coords -> let game' = updateGame game coords sq
                         in if gameWon game'
-                              then shutdown uiData' >> return Won
-                              else turnLoop game' uiData'
-    Undo -> turnLoop (undo game) uiData'
-    Redo -> turnLoop (redo game) uiData'
+                              then shutdown uiChannel >> return Won
+                              else turnLoop game' uiChannel
+    Undo -> turnLoop (undo game) uiChannel
+    Redo -> turnLoop (redo game) uiChannel
 
 playGame :: (UI m) => Nonogram -> m GameResult
 playGame nonogram = do let game = newGame nonogram
-                       uiData <- initialize game
-                       turnLoop game uiData
+                       uiChannel <- initialize game
+                       turnLoop game uiChannel
 
 main :: IO ()
 main = do args <- getArgs
