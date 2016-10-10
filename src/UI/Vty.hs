@@ -1,37 +1,44 @@
 {-# LANGUAGE OverloadedStrings, TypeFamilies, GeneralizedNewtypeDeriving #-}
 module UI.Vty where
-import Graphics.Vty.Widgets.All
-import Graphics.Vty
-import Graphics.Vty.Attributes
+
+import qualified Brick.Main as BM
+import qualified Brick.AttrMap as BA
+import qualified Brick.Widgets.Border as BB
+import qualified Brick.Widgets.Border.Style as BBS
+import qualified Brick.Widgets.Core as BC
+import qualified Brick.Util as BU
+import Brick.Widgets.Core ((<+>), (<=>))
+import qualified Brick.Widgets.Center as Center
+import Brick.Types (Widget, EventM, Next, Padding(..))
+import qualified Graphics.Vty as Vty
+
 import Core
+import Data.Default
 import qualified Data.List as L
-import qualified Data.Text as T
 import UI
 import Action
 import Control.Concurrent
-import Control.Concurrent.STM
-import Control.Concurrent.STM.TChan
+import qualified Control.Concurrent.Chan as Chan
 
 import Control.Monad
-import Control.Monad.Trans
-import Control.Monad.Trans.State
+import Control.Monad.State
+import Control.Monad.IO.Class
 
-data CellUIType = Plain | Point | Marked deriving (Show)
-data CellUI = CellUI { square :: Square, cellUIType :: CellUIType }
-
-data VtyData = VtyData { cells :: [[Widget FormattedText]]
-                       , rowHints :: [[Widget FormattedText]]
-                       , colHints :: [[Widget FormattedText]]
-                       , point :: (Int, Int)
+data VtyData = VtyData { point :: (Int, Int)
                        , mark :: Maybe (Int, Int)
-                       , keyChan :: TChan (Key, [Modifier])
-                       , done :: MVar () }
-type VtyM a = StateT VtyData IO a
+                       , eventChan :: Chan.Chan NonoEvent
+                       , actionResult :: MVar (Action, VtyData)
+                       , done :: MVar ()
+                       }
 
-newtype VtyIO a = VtyIO { unVtyIO :: IO a } deriving (Monad)
+type VtyM a = State VtyData a
 
+newtype VtyIO a = VtyIO { unVtyIO :: IO a } deriving (Functor, Applicative, Monad)
+
+data NonoEvent = VtyEvent Vty.Event | MakeMove Game | Stop
 
 data Direction = Up | Down | Lft | Rgt
+
 coordsForDirection dir = case dir of
   Up   -> (0, -1)
   Down -> (0, 1)
@@ -84,22 +91,22 @@ squareAtPoint :: Game -> VtyM Square
 squareAtPoint game = do (x, y) <- gets point
                         return $ squareAt game x y
 
-cellWidth = 5
-cellHeight = 2
+cellWidth = 6
+cellHeight = 3
 
 charFor Filled = '#'
 charFor Empty = '.'
 charFor Unknown = ' '
 
-type Point = (Int, Int)
-between :: Point -> (Point, Point) -> Bool
-between (x, y) ((a1, b1), (a2, b2)) | x == a1 && x == a2 && elem y ([b1..b2] ++ [b2..b1]) = True
-                                    | y == b1 && y == b2 && elem x ([a1..a2] ++ [a2..a1]) = True
-                                    | otherwise                                           = False
-
 
 to :: Int -> Int -> [Int]
 to x y = if null [x..y] then [y..x] else [x..y]
+
+type Point = (Int, Int)
+between :: Point -> (Point, Point) -> Bool
+between (x, y) ((a1, b1), (a2, b2)) | x == a1 && x == a2 && elem y (b1 `to` b2) = True
+                                    | y == b1 && y == b2 && elem x (a1 `to` a2) = True
+                                    | otherwise                                 = False
 
 selectedCoords :: VtyM [(Int, Int)]
 selectedCoords = do (px, py) <- gets point
@@ -109,47 +116,27 @@ selectedCoords = do (px, py) <- gets point
                       Just (mx, my) | px == mx -> return $ map (\n -> (px, n)) $ py `to` my
                                     | py == my -> return $ map (\n -> (n, py)) $ px `to` mx
 
-getUIType :: (Int, Int) -> VtyM CellUIType
-getUIType coords = do
-  pt <- gets point
-  mk <- gets mark
-  return $ case mk of
-             _ | pt == coords -> Point
-             Just m | coords `between` (m, pt) -> Marked
-             _ -> Plain
-
-squareText :: Square -> T.Text
+squareText :: Square -> String
 squareText square = charFor square |> replicate cellWidth
                                    |> replicate cellHeight
                                    |> L.intercalate "\n"
-                                   |> T.pack
-
-cellStyle Plain  = Attr Default Default Default
-cellStyle Point  = Attr Default (SetTo black) (SetTo white)
-cellStyle Marked = Attr Default (SetTo black) (SetTo bright_blue)
-
-createCells :: Int -> Int -> IO [[Widget FormattedText]]
-createCells x y = replicateM y $ replicateM x $ plainText ""
-
-scheduleM :: VtyM () -> VtyM ()
-scheduleM action = StateT $ \s -> do schedule $ (runStateT action s >> return ())
-                                     return ((), s)
-
-formatGrid :: Game -> VtyM ()
-formatGrid game = do
-  c <- gets cells
-  forM_ (c `zip` [0..]) $ \(row, rowNum) -> do
-    forM_ (row `zip` [0..]) $ \(widget, colNum) -> do
-      uiType <- getUIType (colNum, rowNum)
-      let style = cellStyle uiType
-          txt = squareText $ squareAt game colNum rowNum
-      liftIO $ setTextWithAttrs widget [(txt, style)]
-
 
 emptyVtyData :: IO VtyData
-emptyVtyData = do keyCh <- newTChanIO
+emptyVtyData = do eventChan <- Chan.newChan
+                  actionResult <- newEmptyMVar
                   done <- newEmptyMVar
-                  return $ VtyData [] [] [] (0, 0) Nothing keyCh done
+                  return $ VtyData (0, 0) Nothing eventChan actionResult done
+
+pointAttr = BA.attrName "point"
+markedAttr = BA.attrName "marked"
+provenAttr = BA.attrName "proven"
+unprovenAttr = BA.attrName "unproven"
+
+attrMap = BA.attrMap Vty.defAttr [ (pointAttr, Vty.brightWhite `BU.on` Vty.blue)
+                                 , (markedAttr, Vty.brightWhite `BU.on` Vty.brightBlue)
+                                 , (provenAttr, BU.fg Vty.brightWhite)
+                                 , (unprovenAttr, BU.fg Vty.white)
+                                 ]
 
 padList :: a -> [[a]] -> [[a]]
 padList _ [] = []
@@ -157,167 +144,207 @@ padList x xss = let l = maximum (map length xss)
                 in flip map xss $ \xs -> let n = length xs
                                          in replicate (l-n) x ++ xs
 
-paddedHints :: Nonogram -> Nonogram -> [[Maybe (Int, Proven)]]
-paddedHints soln nono = nono |> hints soln
-                             |> map (map Just)
-                             |> padList Nothing
+for = flip map
 
-createRowHints :: Nonogram -> IO [[Widget FormattedText]]
-createRowHints soln = do let h = paddedHints soln soln
-                             (x, y) = (length $ head h, length h)
-                             emptyContent = T.pack $ "\n " ++ replicate cellHeight '\n'
-                         replicateM y $ replicateM x $ plainText emptyContent
+attrForProven True = provenAttr
+attrForProven False = unprovenAttr
 
+makeRowHints :: Game -> (Int, Widget ())
+makeRowHints game =
+  let rowHints = hints (solution game) (current game)
 
-createColHints :: Nonogram -> IO [[Widget FormattedText]]
-createColHints nono = do x <- createRowHints (transpose nono)
-                         return $ transpose x
+      hintRowSeparation = 1
 
-styleForProven :: Proven -> Attr
-styleForProven True = Attr Default Default Default
-styleForProven False = Attr (SetTo bold) Default Default
+      rowLength row = row |> map snd
+                          |> map show
+                          |> L.intercalate " "
+                          |> length
 
-formatRowHints :: Game -> [[Widget FormattedText]] -> IO ()
-formatRowHints game hints = do
-  let soln = solution game
-      curr = current game
-      pHints = paddedHints soln curr
-  forM_ (zip hints [0..]) $ \(row, rowNum) -> do
-    forM_ (zip row [0..]) $ \(col, colNum) -> do
-      case pHints !! rowNum !! colNum of
-        Nothing -> return ()
-        Just (num, proven) -> let widget = hints !! rowNum !! colNum
-                                  vpadding = replicate (cellHeight - 1) '\n'
-                                  txt = T.pack $ "\n  " ++ show num ++ vpadding ++ " "
-                                  style = styleForProven proven
-                              in setTextWithAttrs widget [(txt, style)]
+      maxRowLength = rowHints |> map rowLength
+                              |> foldr max 0
+                              |> (+ hintRowSeparation)
 
-formatColHints :: Game -> [[Widget FormattedText]] -> IO ()
-formatColHints game hints = formatRowHints (transpose game) (transpose hints)
+      vPadding = cellHeight `div` 2
+      abovePadding = replicate (vPadding + 1) (BC.str " ") |> foldr (<=>) (BC.str "")
+      belowPadding = replicate vPadding (BC.str " ") |> foldr (<=>) (BC.str "")
 
+      makeRow :: [Widget ()] -> Widget ()
+      makeRow row = row |> foldl (\w row -> w <+> row) (BC.str " ")
+                        |> (\r -> abovePadding <=> r <=> belowPadding)
+                        |> BC.padLeft Max
+                        |> BC.hLimit maxRowLength
 
-toTable :: (RowLike a) => [[a]] -> [ColumnSpec] -> BorderStyle -> IO (Widget Table)
-toTable xss cols border = do
-  rows <- forM xss $ \xs -> xs |> map mkRow
-                               |> foldl1 (.|.)
-                               |> return
-  tbl <- newTable cols border
-  sequence_ $ map (addRow tbl) rows
-  return tbl
+      makeCol :: [Widget ()] -> Widget ()
+      makeCol = foldl (\w col -> w <=>  col) (BC.str "")
 
-redraw game = scheduleM $ do formatGrid game
-                             rh <- gets rowHints
-                             ch <- gets colHints
-                             liftIO $ formatRowHints game rh
-                             liftIO $ formatColHints game ch
+      widget (n, proven) = BC.withAttr (attrForProven proven) $
+                             BC.str (" " ++ show n ++ replicate hintRowSeparation ' ')
 
-initializeM :: Game -> VtyM ()
-initializeM game = do
-    let nono = solution game
-        (x, y) = dimensions nono
-    rows <- liftIO $ createCells x y
-    rh <- liftIO $ createRowHints (solution game)
-    ch <- liftIO $ createColHints (solution game)
-    modify $ \vty -> vty{cells = rows,
-                         rowHints = rh,
-                         colHints = ch}
-    keychan <- gets keyChan
-    done <- gets done
+      widgets = for rowHints $ \row ->
+                  for row $ \hint ->
+                    widget hint
 
-    liftIO $ forkIO $ do
-        c <- newCollection
-        fg <- newFocusGroup
+  in (maxRowLength, makeCol $ map makeRow widgets)
 
-        gridTbl <- toTable rows (replicate x $ column (ColFixed cellWidth)) BorderFull
+makeColHints :: Game -> Widget ()
+makeColHints game =
+  let transposed = transpose game
+      colHints = hints (solution transposed) (current transposed)
 
-        let rhx = fst (dimensions rh)
-        rowHintsTbl <- toTable rh (replicate rhx $ column (ColFixed cellWidth)) BorderNone
+      maxColLength = colHints |> map length |> foldr max 0
 
+      hPadding = cellWidth `div` 2
+      leftPadding = replicate (hPadding) (BC.str " ") |> foldr (<+>) (BC.str "")
+      rightPadding = replicate hPadding (BC.str " ") |> foldr (<+>) (BC.str "")
 
-        paddingCol <- plainText ""
-        let chx = fst (dimensions ch)
-            paddingColSpec = column $ ColFixed $ cellWidth * rhx
-            normalColSpecs = replicate chx $ column (ColFixed $ cellWidth + 1)
-            colHintsWithPaddedCol = map (paddingCol:) ch
-        colHintsTbl <- toTable colHintsWithPaddedCol (paddingColSpec:normalColSpecs) BorderNone
+      makeCol :: [Widget ()] -> Widget ()
+      makeCol col = col |> foldl (\w col -> w <=>  col) (BC.str " ")
+                        |> (\c -> leftPadding <+> c <+> rightPadding)
+                        |> BC.padTop Max
+                        |> BC.vLimit maxColLength
 
+      widget (n, proven) = BC.withAttr (attrForProven proven) $ BC.str (show n)
 
-        disp <- rowHintsTbl `hBox` gridTbl >>= (vBox colHintsTbl) >>= centered
-        _ <- addToCollection c disp fg
+      widgets = for colHints $ \col ->
+                  for col $ \hint ->
+                    widget hint
 
-        fg `onKeyPressed` \_ key modifiers -> do
-          atomically $ writeTChan keychan (key, modifiers)
-          return True
+      widgetColumns = map makeCol widgets
 
-        runUi c defaultContext
-        putMVar done ()
+  in foldl (<+>) (BC.str "") widgetColumns
 
-    return ()
+makeCell :: VtyData -> Square -> Int -> Int -> Widget ()
+makeCell vtyData square x y =
+  let setBgColor w = case mark vtyData of
+        _ | (x, y) == point vtyData -> BC.withAttr pointAttr w
+        Just mk | (x, y) `between` (point vtyData, mk) -> BC.withAttr markedAttr w
+        _ -> w
 
-dirKeyMap :: [(Key, Direction)]
-dirKeyMap =  [(KRight, Rgt), (KLeft, Lft), (KUp, Up), (KDown, Down)]
+  in setBgColor $ BC.str (squareText square)
 
-uiLoop :: Game -> VtyM Action
-uiLoop game = do
-    keyChan <- gets keyChan
-    (key, modifiers) <- liftIO $ atomically $ readTChan keyChan
-    maybeAction <- case key of
-      KASCII 'q' -> return $ Just Quit
+drawUi :: (Game, VtyData) -> [Widget ()]
+drawUi (game, vtyData) =
+  let curr = current game
+      (numCols, numRows) = dimensions curr
 
-      KASCII 'd' -> if MCtrl `elem` modifiers
-                       then return $ Just Quit
-                       else return Nothing
+      makeRow :: [Widget ()] -> Widget ()
+      makeRow = BC.vLimit cellHeight . foldl1 (\w row -> w <+> BB.vBorder <+> row)
 
-      KASCII 'u' -> do clearMark
-                       return $ Just Undo
+      makeCol :: [Widget ()] -> Widget ()
+      makeCol = foldl1 (\w col -> w <=> BB.hBorder <=> col)
 
-      KASCII 'r' -> do clearMark
-                       return $ Just Redo
+      cells = for (rows curr `zip` [0..]) $ \(row, y) ->
+                for (row `zip` [0..]) $ \(square, x) ->
+                  makeCell vtyData square x y
 
-      KASCII 'x' -> do coords <- selectedCoords
-                       clearMark
-                       sq <- squareAtPoint game
-                       let sq' = if sq == Filled then Unknown else Filled
-                       return $ Just $ Update sq' coords
+      grid = BC.withBorderStyle BBS.unicode $
+        BB.border $
+        BC.hLimit (numCols * (cellWidth + 1) - 1) $
+        BC.vLimit (numRows * (cellHeight + 1) - 1) $
+        makeCol (map makeRow cells)
 
-      KASCII 'c' -> if MCtrl `elem` modifiers
-                       then return $ Just Quit
-                       else do coords <- selectedCoords
-                               clearMark
-                               sq <- squareAtPoint game
-                               let sq' = if sq == Empty then Unknown else Empty
-                               return $ Just $ Update sq' coords
+      (rowHintsPadding, rowHints) = makeRowHints game
+      colHints = BC.padLeft (Pad rowHintsPadding) $ makeColHints game
 
-      KASCII ' ' -> do coords <- selectedCoords
-                       clearMark
-                       return $ Just $ Update Unknown coords
+  in [Center.center $ BC.vBox [colHints, BC.hBox [rowHints, grid]]]
 
-      key -> case lookup key dirKeyMap of
-               Just dir -> do markSet <- markIsSet
-                              aligned <- pointAlignedWithMark dir
-                              let shifted = MShift `elem` modifiers
+dirKeyMap :: [(Vty.Key, Direction)]
+dirKeyMap =  [(Vty.KRight, Rgt), (Vty.KLeft, Lft), (Vty.KUp, Up), (Vty.KDown, Down)]
 
-                              case () of
-                                _ | not markSet && shifted -> setMarkAtPoint
-                                  | markSet && not shifted -> clearMark
-                                  | markSet && not aligned -> setPointAtMark
-                                  | otherwise              -> return ()
+appEvent :: (Game, VtyData) -> NonoEvent -> EventM () (Next (Game, VtyData))
+appEvent state Stop = BM.halt state
 
-                              movePoint game dir
-                              redraw game
-                              return Nothing
-               Nothing -> return Nothing
+appEvent (_, vtyData) (MakeMove newGame) = BM.continue (newGame, vtyData)
 
-    maybe (uiLoop game) return maybeAction
+appEvent state@(game, vtyData) (VtyEvent (Vty.EvKey key modifiers)) = do
+  let putResult = liftIO . putMVar (actionResult vtyData)
+      continue = BM.continue state
+      quit = putResult (Quit, vtyData) >> continue
+
+  case key of
+    Vty.KChar 'q' -> quit
+
+    Vty.KChar 'd' -> if Vty.MCtrl `elem` modifiers
+                        then quit
+                        else continue
+
+    Vty.KChar 'u' -> do let newData = execState clearMark vtyData
+                        putResult (Undo, newData)
+                        BM.continue (game, newData)
+
+    Vty.KChar 'r' -> do let newData = execState clearMark vtyData
+                        putResult (Redo, newData)
+                        BM.continue (game, newData)
+
+    Vty.KChar 'x' -> do let action = do coords <- selectedCoords
+                                        clearMark
+                                        sq <- squareAtPoint game
+                                        let sq' = if sq == Filled then Unknown else Filled
+                                        return (sq', coords)
+                            ((sq, coords), newData) = runState action vtyData
+
+                        putResult (Update sq coords, newData)
+                        BM.continue (game, newData)
+
+    Vty.KChar 'c' -> if Vty.MCtrl `elem` modifiers
+                        then quit
+                        else do let action = do coords <- selectedCoords
+                                                clearMark
+                                                sq <- squareAtPoint game
+                                                let sq' = if sq == Empty then Unknown else Empty
+                                                return (sq', coords)
+                                    ((sq, coords), newData) = runState action vtyData
+
+                                putResult (Update sq coords, newData)
+                                BM.continue (game, newData)
+
+    Vty.KChar ' ' -> do let action = do coords <- selectedCoords
+                                        clearMark
+                                        return coords
+                            (coords, newData) = runState action vtyData
+
+                        putResult (Update Unknown coords, newData)
+                        BM.continue (game, newData)
+
+    key ->
+      case lookup key dirKeyMap of
+        Nothing -> continue
+        Just dir -> let action = do markSet <- markIsSet
+                                    aligned <- pointAlignedWithMark dir
+                                    let shifted = Vty.MShift `elem` modifiers
+
+                                    case () of
+                                      _ | not markSet && shifted -> setMarkAtPoint
+                                        | markSet && not shifted -> clearMark
+                                        | markSet && not aligned -> setPointAtMark
+                                        | otherwise              -> return ()
+
+                                    movePoint game dir
+                        newData = execState action vtyData
+
+                    in BM.continue (game, newData)
+
+app :: BM.App (Game, VtyData) NonoEvent ()
+app = BM.App { BM.appDraw = drawUi
+             , BM.appAttrMap = const attrMap
+             , BM.appLiftVtyEvent = VtyEvent
+             , BM.appChooseCursor = BM.neverShowCursor
+             , BM.appHandleEvent = appEvent
+             , BM.appStartEvent = return
+             }
 
 instance UI VtyIO where
   type UIData VtyIO = VtyData
 
-  initialize game = VtyIO $ do d <- emptyVtyData
-                               execStateT (initializeM game) d
+  initialize game = VtyIO $ do
+    vtyData <- emptyVtyData
+    forkIO $ do BM.customMain (Vty.mkVty def) (eventChan vtyData) app (game, vtyData)
+                putMVar (done vtyData) ()
+    return vtyData
 
-  display game vtyData = VtyIO $ runStateT (redraw game) vtyData >> return ()
-  promptMove game vtyData = VtyIO $ runStateT (uiLoop game) vtyData
+  display game vtyData = VtyIO $ Chan.writeChan (eventChan vtyData) (MakeMove game)
 
-  shutdown vtyData = VtyIO $ do schedule shutdownUi
+  promptAction game vtyData = VtyIO $ takeMVar (actionResult vtyData)
+
+  shutdown vtyData = VtyIO $ do Chan.writeChan (eventChan vtyData) Stop
                                 takeMVar (done vtyData)

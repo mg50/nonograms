@@ -1,4 +1,3 @@
-{-# LANGUAGE ScopedTypeVariables #-}
 module Main where
 import Control.Monad
 import Core
@@ -14,7 +13,7 @@ data GameResult = Exited | Won deriving (Eq)
 turnLoop :: (UI m) => Game -> UIData m -> m GameResult
 turnLoop game uiData = do
   display game uiData
-  (action, uiData') <- promptMove game uiData
+  (action, uiData') <- promptAction game uiData
   case action of
     Quit -> shutdown uiData' >> return Exited
     Update sq coords -> let game' = updateGame game coords sq
@@ -23,7 +22,6 @@ turnLoop game uiData = do
                               else turnLoop game' uiData'
     Undo -> turnLoop (undo game) uiData'
     Redo -> turnLoop (redo game) uiData'
-
 
 playGame :: (UI m) => Nonogram -> m GameResult
 playGame nonogram = do let game = newGame nonogram
