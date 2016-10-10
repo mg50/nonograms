@@ -160,30 +160,33 @@ makeRowHints game =
 
       hintRowSeparation = 1
 
-      rowLength row = row |> map snd
+      rowLength row = row |> map fst
                           |> map show
                           |> L.intercalate " "
+                          |> (\str -> " " ++ str ++ " ")
                           |> length
 
       maxRowLength = rowHints |> map rowLength
                               |> foldr max 0
-                              |> (+ hintRowSeparation)
 
       vPadding = cellHeight `div` 2
       abovePadding = replicate (vPadding + 1) (BC.str " ") |> foldr (<=>) (BC.str "")
       belowPadding = replicate vPadding (BC.str " ") |> foldr (<=>) (BC.str "")
 
       makeRow :: [Widget ()] -> Widget ()
-      makeRow row = row |> foldl (\w row -> w <+> row) (BC.str " ")
+      makeRow row = row |> (\r -> case r of
+                                    [] -> (BC.str " ")
+                                    _  -> foldl (\w row -> w <+> row) BC.emptyWidget r)
                         |> (\r -> abovePadding <=> r <=> belowPadding)
                         |> BC.padLeft Max
                         |> BC.hLimit maxRowLength
+                        |> (<+> BC.str (replicate hintRowSeparation ' '))
 
       makeCol :: [Widget ()] -> Widget ()
       makeCol = foldl (\w col -> w <=>  col) (BC.str "")
 
       widget (n, proven) = BC.withAttr (attrForProven proven) $
-                             BC.str (" " ++ show n ++ replicate hintRowSeparation ' ')
+                             BC.str (" " ++ show n)
 
       widgets = for rowHints $ \row ->
                   for row $ \hint ->
@@ -196,7 +199,7 @@ makeColHints game =
   let transposed = transpose game
       colHints = hints (solution transposed) (current transposed)
 
-      maxColLength = colHints |> map length |> foldr max 0
+      maxColLength = colHints |> map length |> foldr max 0 |> (+1)
 
       hPadding = cellWidth `div` 2
       leftPadding = replicate (hPadding) (BC.str " ") |> foldr (<+>) (BC.str "")
@@ -238,6 +241,7 @@ drawUi (game, cursorData, vtyChan) =
       makeCol :: [Widget ()] -> Widget ()
       makeCol = foldl1 (\w col -> w <=> BB.hBorder <=> col)
 
+      soln = solution game
       cells = for (rows curr `zip` [0..]) $ \(row, y) ->
                 for (row `zip` [0..]) $ \(square, x) ->
                   makeCell cursorData square x y
@@ -249,7 +253,7 @@ drawUi (game, cursorData, vtyChan) =
         makeCol (map makeRow cells)
 
       (rowHintsPadding, rowHints) = makeRowHints game
-      colHints = BC.padLeft (Pad rowHintsPadding) $ makeColHints game
+      colHints = BC.padLeft (Pad (rowHintsPadding + 1)) $ makeColHints game
 
   in [Center.center $ BC.vBox [colHints, BC.hBox [rowHints, grid]]]
 
