@@ -347,7 +347,8 @@ instance UI VtyIO where
 
   initialize game = VtyIO $ do
     vtyChan <- emptyVtyChan
-    forkIO $ do BM.customMain (Vty.mkVty def) (eventChan vtyChan) app (game, emptyCursorData, vtyChan)
+    forkIO $ do let initialState = (game, emptyCursorData, vtyChan)
+                BM.customMain (Vty.mkVty def) (eventChan vtyChan) app initialState
                 putMVar (done vtyChan) ()
     return vtyChan
 
