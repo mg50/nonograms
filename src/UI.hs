@@ -11,3 +11,6 @@ class (Monad a) => UI a where
   display :: Game -> UIChannel a -> a ()
   promptAction :: Game -> UIChannel a -> a Action
   shutdown :: UIChannel a -> a ()
+
+pipe :: (Monad m) => m a -> [a -> m b] -> m b
+pipe ma (f:[]) = ma >>= f

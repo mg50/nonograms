@@ -24,16 +24,17 @@ import Control.Monad
 import Control.Monad.State
 import Control.Monad.IO.Class
 
-data CursorData = CursorData { point :: (Int, Int)
-                             , mark :: Maybe (Int, Int)
-                             }
+data DisplayData = DisplayData { point :: (Int, Int)
+                               , mark :: Maybe (Int, Int)
+                               , displaySolution :: Bool
+                               }
 
 data VtyChan = VtyChan { eventChan :: Chan.Chan NonoEvent
                        , actionResult :: MVar Action
                        , done :: MVar ()
                        }
 
-type CursorM a = State CursorData a
+type DisplayM a = State DisplayData a
 
 newtype VtyIO a = VtyIO { unVtyIO :: IO a } deriving (Functor, Applicative, Monad)
 
@@ -47,7 +48,7 @@ coordsForDirection dir = case dir of
   Lft  -> (-1, 0)
   Rgt  -> (1, 0)
 
-movePoint :: Game -> Direction -> CursorM ()
+movePoint :: Game -> Direction -> DisplayM ()
 movePoint game dir = let (dimX, dimY) = dimensions (current game)
                          (dx, dy) = coordsForDirection dir
                      in modify $ \cursor -> do
@@ -58,20 +59,20 @@ movePoint game dir = let (dimX, dimY) = dimensions (current game)
                           then cursor{point=(x', y')}
                           else cursor
 
-clearMark :: CursorM ()
+clearMark :: DisplayM ()
 clearMark = modify $ \cursor -> cursor{mark=Nothing}
 
-markIsSet :: CursorM Bool
+markIsSet :: DisplayM Bool
 markIsSet = do m <- gets mark
                case m of
                  Nothing -> return False
                  _       -> return True
 
-setMarkAtPoint :: CursorM ()
+setMarkAtPoint :: DisplayM ()
 setMarkAtPoint = modify $ \cursor -> let pt = (point cursor)
                                      in cursor{mark=(Just pt)}
 
-pointAlignedWithMark :: Direction -> CursorM Bool
+pointAlignedWithMark :: Direction -> DisplayM Bool
 pointAlignedWithMark dir = do (px, py) <- gets point
                               let (dx, dy) = coordsForDirection dir
                                   px' = px + dx
@@ -83,13 +84,13 @@ pointAlignedWithMark dir = do (px, py) <- gets point
                                                        | py' == my  -> True
                                                        | otherwise  -> False
 
-setPointAtMark :: CursorM ()
+setPointAtMark :: DisplayM ()
 setPointAtMark = do mk <- gets mark
                     case mk of
                       Nothing -> return ()
                       Just m -> modify $ \info -> info{point = m}
 
-squareAtPoint :: Game -> CursorM Square
+squareAtPoint :: Game -> DisplayM Square
 squareAtPoint game = do (x, y) <- gets point
                         return $ squareAt game x y
 
@@ -110,7 +111,7 @@ between (x, y) ((a1, b1), (a2, b2)) | x == a1 && x == a2 && elem y (b1 `to` b2) 
                                     | y == b1 && y == b2 && elem x (a1 `to` a2) = True
                                     | otherwise                                 = False
 
-selectedCoords :: CursorM [(Int, Int)]
+selectedCoords :: DisplayM [(Int, Int)]
 selectedCoords = do (px, py) <- gets point
                     mk <- gets mark
                     case mk of
@@ -129,8 +130,8 @@ emptyVtyChan = do eventChan <- Chan.newChan
                   done <- newEmptyMVar
                   return $ VtyChan eventChan actionResult done
 
-emptyCursorData :: CursorData
-emptyCursorData = CursorData (0, 0) Nothing
+emptyDisplayData :: DisplayData
+emptyDisplayData = DisplayData (0, 0) Nothing False
 
 pointAttr = BA.attrName "point"
 markedAttr = BA.attrName "marked"
@@ -221,19 +222,21 @@ makeColHints game =
 
   in foldl (<+>) (BC.str "") widgetColumns
 
-makeCell :: CursorData -> Square -> Int -> Int -> Widget ()
-makeCell cursorData square x y =
-  let setBgColor w = case mark cursorData of
-        _ | (x, y) == point cursorData -> BC.withAttr pointAttr w
-        Just mk | (x, y) `between` (point cursorData, mk) -> BC.withAttr markedAttr w
+makeCell :: DisplayData -> Square -> Int -> Int -> Widget ()
+makeCell displayData square x y =
+  let setBgColor w = case mark displayData of
+        _ | (x, y) == point displayData -> BC.withAttr pointAttr w
+        Just mk | (x, y) `between` (point displayData, mk) -> BC.withAttr markedAttr w
         _ -> w
 
   in setBgColor $ BC.str (squareText square)
 
-drawUi :: (Game, CursorData, VtyChan) -> [Widget ()]
-drawUi (game, cursorData, vtyChan) =
-  let curr = current game
-      (numCols, numRows) = dimensions curr
+drawUi :: (Game, DisplayData, VtyChan) -> [Widget ()]
+drawUi (game, displayData, vtyChan) =
+  let nono = if displaySolution displayData
+                then solution game
+                else current game
+      (numCols, numRows) = dimensions nono
 
       makeRow :: [Widget ()] -> Widget ()
       makeRow = BC.vLimit cellHeight . foldl1 (\w row -> w <+> BB.vBorder <+> row)
@@ -241,10 +244,9 @@ drawUi (game, cursorData, vtyChan) =
       makeCol :: [Widget ()] -> Widget ()
       makeCol = foldl1 (\w col -> w <=> BB.hBorder <=> col)
 
-      soln = solution game
-      cells = for (rows curr `zip` [0..]) $ \(row, y) ->
+      cells = for (rows nono `zip` [0..]) $ \(row, y) ->
                 for (row `zip` [0..]) $ \(square, x) ->
-                  makeCell cursorData square x y
+                  makeCell displayData square x y
 
       grid = BC.withBorderStyle BBS.unicode $
         BB.border $
@@ -260,12 +262,12 @@ drawUi (game, cursorData, vtyChan) =
 dirKeyMap :: [(Vty.Key, Direction)]
 dirKeyMap =  [(Vty.KRight, Rgt), (Vty.KLeft, Lft), (Vty.KUp, Up), (Vty.KDown, Down)]
 
-appEvent :: (Game, CursorData, VtyChan) -> NonoEvent -> EventM () (Next (Game, CursorData, VtyChan))
+appEvent :: (Game, DisplayData, VtyChan) -> NonoEvent -> EventM () (Next (Game, DisplayData, VtyChan))
 appEvent state Stop = BM.halt state
 
-appEvent (_, cursorData, vtyChan) (MakeMove newGame) = BM.continue (newGame, cursorData, vtyChan)
+appEvent (_, displayData, vtyChan) (MakeMove newGame) = BM.continue (newGame, displayData, vtyChan)
 
-appEvent state@(game, cursorData, vtyChan) (VtyEvent (Vty.EvKey key modifiers)) = do
+appEvent state@(game, displayData, vtyChan) (VtyEvent (Vty.EvKey key modifiers)) = do
   let putResult = liftIO . putMVar (actionResult vtyChan)
       continue = BM.continue state
       quit = putResult Quit >> continue
@@ -277,11 +279,11 @@ appEvent state@(game, cursorData, vtyChan) (VtyEvent (Vty.EvKey key modifiers)) 
                         then quit
                         else continue
 
-    Vty.KChar 'u' -> do let newData = execState clearMark cursorData
+    Vty.KChar 'u' -> do let newData = execState clearMark displayData
                         putResult Undo
                         BM.continue (game, newData, vtyChan)
 
-    Vty.KChar 'r' -> do let newData = execState clearMark cursorData
+    Vty.KChar 'r' -> do let newData = execState clearMark displayData
                         putResult Redo
                         BM.continue (game, newData, vtyChan)
 
@@ -290,7 +292,7 @@ appEvent state@(game, cursorData, vtyChan) (VtyEvent (Vty.EvKey key modifiers)) 
                                         sq <- squareAtPoint game
                                         let sq' = if sq == Filled then Unknown else Filled
                                         return (sq', coords)
-                            ((sq, coords), newData) = runState action cursorData
+                            ((sq, coords), newData) = runState action displayData
 
                         putResult (Update sq coords)
                         BM.continue (game, newData, vtyChan)
@@ -302,7 +304,7 @@ appEvent state@(game, cursorData, vtyChan) (VtyEvent (Vty.EvKey key modifiers)) 
                                                 sq <- squareAtPoint game
                                                 let sq' = if sq == Empty then Unknown else Empty
                                                 return (sq', coords)
-                                    ((sq, coords), newData) = runState action cursorData
+                                    ((sq, coords), newData) = runState action displayData
 
                                 putResult (Update sq coords)
                                 BM.continue (game, newData, vtyChan)
@@ -310,10 +312,13 @@ appEvent state@(game, cursorData, vtyChan) (VtyEvent (Vty.EvKey key modifiers)) 
     Vty.KChar ' ' -> do let action = do coords <- selectedCoords
                                         clearMark
                                         return coords
-                            (coords, newData) = runState action cursorData
+                            (coords, newData) = runState action displayData
 
                         putResult (Update Unknown coords)
                         BM.continue (game, newData, vtyChan)
+
+    Vty.KChar 's' -> let newData = displayData{displaySolution = not (displaySolution displayData)}
+                     in BM.continue (game, newData, vtyChan)
 
     key ->
       case lookup key dirKeyMap of
@@ -329,11 +334,11 @@ appEvent state@(game, cursorData, vtyChan) (VtyEvent (Vty.EvKey key modifiers)) 
                                         | otherwise              -> return ()
 
                                     movePoint game dir
-                        newData = execState action cursorData
+                        newData = execState action displayData
 
                     in BM.continue (game, newData, vtyChan)
 
-app :: BM.App (Game, CursorData, VtyChan) NonoEvent ()
+app :: BM.App (Game, DisplayData, VtyChan) NonoEvent ()
 app = BM.App { BM.appDraw = drawUi
              , BM.appAttrMap = const attrMap
              , BM.appLiftVtyEvent = VtyEvent
@@ -347,7 +352,7 @@ instance UI VtyIO where
 
   initialize game = VtyIO $ do
     vtyChan <- emptyVtyChan
-    forkIO $ do let initialState = (game, emptyCursorData, vtyChan)
+    forkIO $ do let initialState = (game, emptyDisplayData, vtyChan)
                 BM.customMain (Vty.mkVty def) (eventChan vtyChan) app initialState
                 putMVar (done vtyChan) ()
     return vtyChan
